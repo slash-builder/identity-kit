@@ -1,0 +1,39 @@
+[package]
+name = "slashbuilder-identity-kit"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Account, family-graph and OIDC authentication primitives for the SlashBuilder Kit ecosystem"
+repository = "https://github.com/slash-builder/identity-kit"
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["identity", "auth", "oidc", "keycloak", "pkce"]
+categories = ["authentication", "api-bindings"]
+# An allow-list, not an exclude: nothing but the library, the docs and the licence can ship by accident.
+include = ["/src/", "/README.md", "/LICENSE", "/CHANGELOG.md"]
+
+# The library keeps the name `identity_kit` so `use identity_kit::...` is unchanged for every Kit that imports it; only
+# the published package name carries the `slashbuilder-` prefix (the plain `identity-kit` is taken on crates.io).
+[lib]
+name = "identity_kit"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+oauth2 = { version = "4", default-features = false }
+jsonwebtoken = "9"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt", "macros", "sync"] }
+thiserror = "1.0"
+uuid = { version = "1", features = ["serde", "v4"] }
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+pretty_assertions = "1.4"
+wiremock = "0.6"
+# Conformance gate: imports the frozen `conformance::{Case, run_suite}` harness from crates.io
+# (`slashbuilder-spec-kit`; the library is still imported as `spec_kit`). Locks the capability/principal invariants.
+slashbuilder-spec-kit = "0.1"
