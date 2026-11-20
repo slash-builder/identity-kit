@@ -4,6 +4,8 @@
 //! Kit ecosystem. The *client* side of identity — talks to an IdP and an
 //! AuthZ engine; doesn't implement either.
 
+#![forbid(unsafe_code)]
+
 pub mod account;
 pub mod authn;
 pub mod authz;
