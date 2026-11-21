@@ -57,9 +57,16 @@ pub enum AccountOrigin {
 /// because a person can hold more than one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
+    /// The account id (`account_id`). The data model says it is never reissued; this crate does not enforce that. For
+    /// Keycloak sign-in it is the userinfo `sub`, which must be a UUID or sign-in fails with [`IdentityError::Auth`].
     pub id: Uuid,
+    /// The name shown for the person. For an account resolved by Keycloak sign-in it is the first of the userinfo `name`,
+    /// `preferred_username`, `email` and `sub` claims that is present (a present but empty value counts as present).
     pub display_name: String,
+    /// The person's email address, if known. Keycloak sign-in takes it from the userinfo `email` claim. This crate does
+    /// not check whether the address is verified.
     pub email: Option<String>,
+    /// How the account came to exist; see [`AccountOrigin`]. Keycloak sign-in always sets [`AccountOrigin::Standalone`].
     pub origin: AccountOrigin,
 }
 
@@ -85,22 +92,38 @@ impl Account {
 /// A device claimed by an account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
+    /// The device id.
     pub id: Uuid,
+    /// The `id` of the [`Account`] that claims the device.
     pub account_id: Uuid,
+    /// The device's name.
     pub name: String,
+    /// The kind of device; see [`DeviceKind`].
     pub kind: DeviceKind,
 }
 
+/// The kind of a [`Device`].
+///
+/// Serialised as the variant name in snake case (`"desktop"`, `"cumulus"`, and so on). This crate attaches no behaviour
+/// to any kind; it is carried with the [`Device`] as given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceKind {
+    /// A desktop device.
     Desktop,
+    /// A mobile device.
     Mobile,
+    /// The `Cumulus` kind.
     Cumulus,
+    /// The `Anvil` kind.
     Anvil,
+    /// The `Wisp` kind.
     Wisp,
+    /// The `Squall` kind.
     Squall,
+    /// The `Halcyon` kind.
     Halcyon,
+    /// A device that fits none of the other kinds.
     Other,
 }
 
@@ -112,11 +135,14 @@ pub enum DeviceKind {
 /// id is retired.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Household {
+    /// The household id (`hid`). The data model says a retired id is never reused; this crate does not enforce that.
     pub id: Uuid,
+    /// The name shown for the household.
     pub display_name: String,
 }
 
 impl Household {
+    /// Construct a `Household` from its id and display name.
     pub fn new(id: Uuid, display_name: impl Into<String>) -> Self {
         Self {
             id,
@@ -137,9 +163,14 @@ impl Household {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FamilyRole {
+    /// An owner of the household. A household must keep at least one `Owner` membership (see [`Membership`]), and the
+    /// identity service accepts [`FamilyClient::invite`](crate::family::FamilyClient::invite) only from an owner.
     Owner,
+    /// An adult member. This crate attaches no behaviour to the role beyond carrying it.
     Adult,
+    /// A child member. This crate attaches no behaviour to the role beyond carrying it.
     Child,
+    /// A guest member. This crate attaches no behaviour to the role beyond carrying it.
     Guest,
 }
 
@@ -158,7 +189,10 @@ pub enum FamilyRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MembershipState {
+    /// A real membership.
     Active,
+    /// An owner-sent invite the invitee has not accepted yet; see
+    /// [`FamilyClient::accept_invite`](crate::family::FamilyClient::accept_invite).
     Pending,
 }
 
@@ -174,10 +208,15 @@ pub enum MembershipState {
 /// - Leaving deletes this row. It never deletes the account.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Membership {
+    /// The `id` of the [`Account`] that holds the membership.
     pub person: Uuid,
+    /// The `id` of the [`Household`] the membership is in.
     pub household: Uuid,
+    /// The person's role in this household. Per membership, not per account.
     pub role: FamilyRole,
+    /// The `joined_at` timestamp (UTC) the identity service reports for the row. This crate does not interpret it.
     pub joined_at: DateTime<Utc>,
+    /// Whether the membership is active or still a pending invite.
     pub state: MembershipState,
 }
 
@@ -200,9 +239,13 @@ pub struct Membership {
 /// future safe (server-minted) implementation will build.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianEdge {
+    /// The `id` of the created child's [`Account`].
     pub child: Uuid,
+    /// The guardian's id, as given to [`GuardianEdge::new`], which does not check it.
     pub guardian: Uuid,
+    /// The id of the household the child was created in, as given to [`GuardianEdge::new`], which does not check it.
     pub household_of_creation: Uuid,
+    /// When the edge was created (UTC), as given to [`GuardianEdge::new`].
     pub created_at: DateTime<Utc>,
     /// Whether the guardian holds an escrowed key for the child. Visible
     /// to the child — never a hidden grant.
@@ -251,6 +294,8 @@ impl GuardianEdge {
 )]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FamilyMember {
+    /// The member's account.
     pub account: Account,
+    /// The member's role.
     pub role: FamilyRole,
 }
