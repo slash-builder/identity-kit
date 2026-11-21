@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/slash-builder/identity-kit/compare/v0.2.0...v0.2.1) - 2026-11-21
+
+### Other
+
+- *(deps)* Bump uuid from 1.26.1 to 1.29.3 ([#6](https://github.com/slash-builder/identity-kit/pull/6))
+- forbid unsafe code ([#9](https://github.com/slash-builder/identity-kit/pull/9))
+- raise the minimum supported Rust version to 1.89 ([#8](https://github.com/slash-builder/identity-kit/pull/8))
+- *(deps)* Bump thiserror from 1.0.69 to 2.0.21 ([#5](https://github.com/slash-builder/identity-kit/pull/5))
+
 First public release, as `slashbuilder-identity-kit` 0.2.0 on crates.io.
 The library is still imported as `identity_kit`. Earlier 0.1.x builds were
 internal only and were never published to crates.io; this file records
