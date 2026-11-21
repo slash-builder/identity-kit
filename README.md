@@ -147,7 +147,7 @@ cd identity-kit
 cargo test
 ```
 
-Requires Rust 1.88 or newer (the minimum supported Rust version, checked
+Requires Rust 1.89 or newer (the minimum supported Rust version, checked
 in CI) and no system libraries. The tests are hermetic: they run against
 a local mock server and never touch a real IdP or keychain. One
 `#[ignore]`d test talks to a live Keycloak realm you point it at; see its

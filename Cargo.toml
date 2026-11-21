@@ -2,7 +2,7 @@
 name = "slashbuilder-identity-kit"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "Account, family-graph and OIDC authentication primitives for the SlashBuilder Kit ecosystem"
 repository = "https://github.com/slash-builder/identity-kit"
 license = "Apache-2.0"
