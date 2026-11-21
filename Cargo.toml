@@ -26,7 +26,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt", "macros", "sync"] }
-thiserror = "1.0"
+thiserror = "2.0"
 uuid = { version = "1", features = ["serde", "v4"] }
 url = "2"
 
