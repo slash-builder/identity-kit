@@ -91,15 +91,21 @@ fn account_base_url(base_url: &str, realm: &str) -> Result<Url, IdentityError> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountProfile {
+    /// The user's id (`id`), if Keycloak sends it.
     #[serde(default)]
     pub id: Option<String>,
+    /// The username (`username`). Required in the response.
     pub username: String,
+    /// The first name (`firstName`), if Keycloak sends it.
     #[serde(default)]
     pub first_name: Option<String>,
+    /// The last name (`lastName`), if Keycloak sends it.
     #[serde(default)]
     pub last_name: Option<String>,
+    /// The email address (`email`), if Keycloak sends it.
     #[serde(default)]
     pub email: Option<String>,
+    /// Whether Keycloak reports the email address as verified (`emailVerified`), if it sends the field.
     #[serde(default)]
     pub email_verified: Option<bool>,
 }
@@ -129,10 +135,14 @@ pub struct AccountProfile {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountProfileUpdate {
+    /// The username to store. Always sent; see the type doc for why it is not optional.
     pub username: String,
+    /// The email address to store. Always sent; see the type doc for why it is not optional.
     pub email: String,
+    /// The first name to store (`firstName`). Left out of the request when `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_name: Option<String>,
+    /// The last name to store (`lastName`). Left out of the request when `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_name: Option<String>,
 }
@@ -153,24 +163,35 @@ pub struct AccountProfileUpdate {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountDevice {
+    /// The device id (`id`). Essentially never populated; see the type doc.
     #[serde(default)]
     pub id: Option<String>,
+    /// The IP address (`ipAddress`), as a string, if Keycloak sends it.
     #[serde(default)]
     pub ip_address: Option<String>,
+    /// The operating system (`os`), if Keycloak sends it.
     #[serde(default)]
     pub os: Option<String>,
+    /// The operating system version (`osVersion`), if Keycloak sends it.
     #[serde(default)]
     pub os_version: Option<String>,
+    /// The browser (`browser`), if Keycloak sends it.
     #[serde(default)]
     pub browser: Option<String>,
+    /// The `device` field of Keycloak's `DeviceRepresentation`, if Keycloak sends it.
     #[serde(default)]
     pub device: Option<String>,
+    /// The `lastAccess` value as Keycloak sends it, passed through unconverted; `0` if absent. This crate does not state
+    /// its unit.
     #[serde(default)]
     pub last_access: i64,
+    /// The `current` flag as Keycloak sends it; `None` if absent.
     #[serde(default)]
     pub current: Option<bool>,
+    /// The `mobile` flag as Keycloak sends it; `false` if absent.
     #[serde(default)]
     pub mobile: bool,
+    /// The device's active sessions; empty if absent. Their ids are what [`AccountClient::revoke_session`] takes.
     #[serde(default)]
     pub sessions: Vec<AccountSession>,
 }
@@ -182,17 +203,27 @@ pub struct AccountDevice {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSession {
+    /// The session id. This is what [`AccountClient::revoke_session`] takes.
     pub id: String,
+    /// The IP address (`ipAddress`), as a string, if Keycloak sends it.
     #[serde(default)]
     pub ip_address: Option<String>,
+    /// The `started` value as Keycloak sends it, passed through unconverted; `0` if absent. This crate does not
+    /// state its unit.
     #[serde(default)]
     pub started: i64,
+    /// The `lastAccess` value as Keycloak sends it, passed through unconverted; `0` if absent. This crate does not state
+    /// its unit.
     #[serde(default)]
     pub last_access: i64,
+    /// The `expires` value as Keycloak sends it, passed through unconverted; `0` if absent. This crate does not
+    /// state its unit.
     #[serde(default)]
     pub expires: i64,
+    /// The browser (`browser`), if Keycloak sends it.
     #[serde(default)]
     pub browser: Option<String>,
+    /// The `current` flag as Keycloak sends it; `None` if absent.
     #[serde(default)]
     pub current: Option<bool>,
     /// The "linked services" data — no separate endpoint is needed for it;
@@ -206,7 +237,9 @@ pub struct AccountSession {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSessionClient {
+    /// The client's id (`clientId`).
     pub client_id: String,
+    /// The client's display name (`clientName`), if Keycloak sends it.
     #[serde(default)]
     pub client_name: Option<String>,
 }
