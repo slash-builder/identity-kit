@@ -18,8 +18,16 @@ use uuid::Uuid;
 pub struct Scope(pub String);
 
 /// A bundle of scopes presented during an authorization check.
+///
+/// The type records scopes; it does not record where they came from or that anyone verified them. See
+/// [`Capabilities::scopes`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Capabilities {
+    /// The scopes in this bundle, in the order given. [`Capabilities::includes`] looks for a match in this list.
+    ///
+    /// For a principal built by [`AuthN::service_principal_keycloak`](crate::authn::AuthN::service_principal_keycloak)
+    /// they are the roles in the access token's `resource_access` claim, read without verifying the token's signature,
+    /// issuer or audience. Code that enforces access must verify the token itself.
     pub scopes: Vec<Scope>,
 }
 
@@ -29,6 +37,7 @@ impl Capabilities {
         Self { scopes }
     }
 
+    /// Whether `required` is in [`Capabilities::scopes`], by exact equality. There is no wildcard or hierarchy matching.
     pub fn includes(&self, required: &Scope) -> bool {
         self.scopes.contains(required)
     }
