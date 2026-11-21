@@ -24,11 +24,11 @@ Pre-1.0: the API can change in any minor release; changes are listed in
 place. **Keycloak AuthN is implemented** — real OIDC discovery +
 Authorization Code + PKCE, silent refresh, the Client Credentials grant
 for non-interactive service principals, all wired to the `TokenCache`
-seam. Auth0 (`AuthN::auth0`) is a stub that panics with
-`unimplemented!()`. `FamilyClient` is a real HTTP client for an identity
+seam. Auth0 (`AuthN::auth0`) is a stub that returns
+`IdentityError::NotImplemented`. `FamilyClient` is a real HTTP client for an identity
 service's household/membership REST routes, but those routes belong to a
 server that is not part of this crate. The deprecated
-`FamilyClient::fetch_members` is also still a stub.
+`FamilyClient::fetch_members` is also still a stub, and returns the same error.
 
 ## Install
 
