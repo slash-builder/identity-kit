@@ -38,7 +38,7 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
 ```
 
-Requires Rust 1.88 or newer. No system libraries are needed: the tests are hermetic (a local mock server, no real identity provider, no keychain). One `#[ignore]`d test needs a live Keycloak realm; it is not run by `cargo test`.
+Requires Rust 1.89 or newer. No system libraries are needed: the tests are hermetic (a local mock server, no real identity provider, no keychain). One `#[ignore]`d test needs a live Keycloak realm; it is not run by `cargo test`.
 
 ## Code style
 
