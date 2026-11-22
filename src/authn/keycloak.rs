@@ -12,7 +12,6 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use jsonwebtoken::{DecodingKey, Validation};
 use oauth2::basic::{BasicClient, BasicTokenResponse};
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
@@ -323,6 +322,10 @@ impl KeycloakServicePrincipalConfig {
 struct ServicePrincipalClaims {
     #[serde(default)]
     resource_access: HashMap<String, ResourceAccessEntry>,
+    /// Kept as raw JSON so a wrong-typed `exp` stays visible as one rather
+    /// than defaulting to "absent"; only [`require_current_exp`] reads it.
+    #[serde(default)]
+    exp: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -347,9 +350,15 @@ struct ResourceAccessEntry {
 /// comment) — the enforcement point is responsible for
 /// independently verifying any token it's handed before acting on it.
 ///
-/// Errors only if `access_token` isn't a well-formed JWT at all (three
+/// What it does check, so the token is at least a current one: `exp` must
+/// be present, a JSON number, and not more than 60 seconds in the past
+/// (see [`require_current_exp`]). `nbf`, `aud`, `iss` and `sub` are not
+/// checked.
+///
+/// Errors if `access_token` isn't a well-formed JWT at all (three
 /// dot-separated, base64url-decodable, JSON segments) — a genuine
-/// transport-level surprise. A well-formed token with no
+/// transport-level surprise — or if its `exp` fails the check above.
+/// A well-formed, current token with no
 /// `resource_access` entry for `roles_client_id`, or an empty `roles`
 /// list, is not an error: it's a principal that authenticated
 /// successfully but holds no capabilities yet, same as
@@ -359,20 +368,18 @@ pub(crate) fn client_role_capabilities(
     access_token: &str,
     roles_client_id: &str,
 ) -> Result<Capabilities, IdentityError> {
-    let mut validation = Validation::default();
-    validation.insecure_disable_signature_validation();
-    validation.validate_aud = false;
-
-    let token_data = jsonwebtoken::decode::<ServicePrincipalClaims>(
+    // `insecure_decode` verifies nothing: not the signature and, unlike the
+    // `Validation` this replaced, not the claims either. The one claim
+    // check this function has always made is `exp`, done below.
+    let token_data = jsonwebtoken::dangerous::insecure_decode::<ServicePrincipalClaims>(
         access_token,
-        &DecodingKey::from_secret(&[]),
-        &validation,
     )
     .map_err(|e| {
         IdentityError::Auth(format!(
             "client-credentials access token was not a well-formed JWT: {e}"
         ))
     })?;
+    require_current_exp(token_data.claims.exp.as_ref(), now_unix())?;
 
     let scopes = token_data
         .claims
@@ -382,6 +389,54 @@ pub(crate) fn client_role_capabilities(
         .unwrap_or_default();
 
     Ok(Capabilities::new(scopes))
+}
+
+/// Seconds an access token's `exp` may lie in the past and still read as
+/// current, to absorb clock skew between the IdP and this host. This is the
+/// default leeway of the `jsonwebtoken` 9 `Validation` this check replaces.
+const EXP_LEEWAY_SECS: u64 = 60;
+
+/// Refuses a token unless its `exp` claim is present, a JSON number (the
+/// RFC 7519 NumericDate: seconds since the epoch, fractions allowed), and
+/// not more than [`EXP_LEEWAY_SECS`] before `now` (Unix seconds).
+///
+/// A hand-written check because `jsonwebtoken::dangerous::insecure_decode`,
+/// the only way left to read a token without verifying its signature,
+/// validates nothing. It mirrors what `Validation::default()` did with
+/// `exp`: a missing, non-numeric, negative or out-of-range `exp` is refused
+/// (never read as "no expiry"), and a token is expired when
+/// `exp < now - leeway`.
+fn require_current_exp(exp: Option<&serde_json::Value>, now: u64) -> Result<(), IdentityError> {
+    let exp = exp.ok_or_else(|| {
+        IdentityError::Auth("client-credentials access token has no `exp` claim".to_string())
+    })?;
+    let exp = numeric_date(exp).ok_or_else(|| {
+        IdentityError::Auth(
+            "client-credentials access token's `exp` claim is not a valid number".to_string(),
+        )
+    })?;
+    if exp < now.saturating_sub(EXP_LEEWAY_SECS) {
+        return Err(IdentityError::Auth(
+            "client-credentials access token has expired".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// A JSON number as whole seconds: an unsigned integer as is, a finite float
+/// in `0..u64::MAX` rounded. Anything else (a string, bool, array, object, a
+/// negative number, a number beyond `u64`) is `None`.
+fn numeric_date(value: &serde_json::Value) -> Option<u64> {
+    let serde_json::Value::Number(number) = value else {
+        return None;
+    };
+    if let Some(whole) = number.as_u64() {
+        return Some(whole);
+    }
+    let fractional = number.as_f64()?;
+    (0.0..u64::MAX as f64)
+        .contains(&fractional)
+        .then(|| fractional.round() as u64)
 }
 
 /// Assembles a JWT-shaped string from a raw header, a raw payload and a
@@ -1819,6 +1874,83 @@ mod tests {
         for (what, token) in cases {
             assert!(!treated_as_valid(&token), "{what} was accepted");
         }
+    }
+
+    #[test]
+    fn require_current_exp_boundary_is_exp_equal_to_now_minus_60() {
+        // Literal numbers on purpose: this is the one place the 60 s leeway
+        // is pinned, so changing the constant must fail here.
+        assert_eq!(EXP_LEEWAY_SECS, 60);
+        let now: u64 = 1_800_000_000;
+        let exp = |v: serde_json::Value| require_current_exp(Some(&v), now);
+        // `exp < now - 60` is expired; `exp == now - 60` is still current.
+        assert!(exp(serde_json::json!(1_799_999_940_u64)).is_ok()); // now - 60
+        assert!(exp(serde_json::json!(1_799_999_939_u64)).is_err()); // now - 61
+        assert!(exp(serde_json::json!(1_799_999_941_u64)).is_ok()); // now - 59
+        assert!(exp(serde_json::json!(now)).is_ok());
+        assert!(exp(serde_json::json!(now + 1)).is_ok());
+        // A fractional exp is rounded to the nearest second first.
+        assert!(exp(serde_json::json!(1_799_999_939.6)).is_ok()); // rounds to now - 60
+        assert!(exp(serde_json::json!(1_799_999_939.4)).is_err()); // rounds to now - 61
+        assert!(require_current_exp(None, now).is_err());
+    }
+
+    #[test]
+    fn client_role_capabilities_does_not_parse_claims_it_does_not_read() {
+        // Only `resource_access` and `exp` are read. Any shape in any other
+        // claim is accepted because the claim is never parsed, including
+        // shapes (an array or object `nbf` or `sub`, a repeated `aud`) that
+        // jsonwebtoken 9's `Validation` refused as a side effect of how it
+        // parsed its own validation struct. A repeated `exp` or
+        // `resource_access`, which the Kit does read, is still refused.
+        let exp = now_unix() + 300;
+        let good_roles = r#""resource_access":{"division-ci":{"roles":["read:builds"]}}"#;
+        let header = KEYCLOAK_JWT_HEADER;
+        for (what, payload) in [
+            (
+                "array nbf",
+                format!(r#"{{"exp":{exp},"nbf":[1],{good_roles}}}"#),
+            ),
+            (
+                "object nbf",
+                format!(r#"{{"exp":{exp},"nbf":{{"a":1}},{good_roles}}}"#),
+            ),
+            (
+                "array sub",
+                format!(r#"{{"exp":{exp},"sub":["x"],{good_roles}}}"#),
+            ),
+            (
+                "object sub",
+                format!(r#"{{"exp":{exp},"sub":{{}},{good_roles}}}"#),
+            ),
+            (
+                "repeated aud",
+                format!(r#"{{"exp":{exp},"aud":"a","aud":"b",{good_roles}}}"#),
+            ),
+        ] {
+            let token = jwt_from_parts(header, &payload, "placeholder-signature");
+            assert!(treated_as_valid(&token), "{what} was refused");
+        }
+        for (what, payload) in [
+            (
+                "repeated exp",
+                format!(r#"{{"exp":{exp},"exp":1,{good_roles}}}"#),
+            ),
+            (
+                "repeated resource_access",
+                format!(r#"{{"exp":{exp},{good_roles},"resource_access":{{}}}}"#),
+            ),
+        ] {
+            let token = jwt_from_parts(header, &payload, "placeholder-signature");
+            assert!(!treated_as_valid(&token), "{what} was accepted");
+        }
+    }
+
+    #[test]
+    fn require_current_exp_does_not_underflow_for_a_clock_before_the_leeway() {
+        // A host clock reading under 60 s since the epoch must not panic.
+        assert!(require_current_exp(Some(&serde_json::json!(0)), 10).is_ok());
+        assert!(require_current_exp(Some(&serde_json::json!(0)), 0).is_ok());
     }
 
     // ---- service_principal(): full client-credentials exchange against a
