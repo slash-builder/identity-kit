@@ -384,6 +384,45 @@ pub(crate) fn client_role_capabilities(
     Ok(Capabilities::new(scopes))
 }
 
+/// Assembles a JWT-shaped string from a raw header, a raw payload and a
+/// verbatim signature segment: the first two are base64url-encoded (no
+/// padding) and joined with the third by dots.
+///
+/// Test-only. `client_role_capabilities` never reads the signature, so test
+/// tokens are not signed; building them by hand also means the tests need no
+/// `jsonwebtoken` crypto backend (see the note on that dependency in
+/// `Cargo.toml`).
+#[cfg(test)]
+pub(crate) fn jwt_from_parts(header: &str, payload: &str, signature: &str) -> String {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    format!(
+        "{}.{}.{signature}",
+        URL_SAFE_NO_PAD.encode(header),
+        URL_SAFE_NO_PAD.encode(payload),
+    )
+}
+
+/// The JOSE header of a token Keycloak signs with its default realm key:
+/// `RS256`, with the `kid` naming the realm key. Test tokens use it so the
+/// tests exercise the shape the Kit really receives (an asymmetric
+/// algorithm and a `kid`), not an HMAC token with no `kid`. Test-only.
+#[cfg(test)]
+pub(crate) const KEYCLOAK_JWT_HEADER: &str =
+    r#"{"alg":"RS256","typ":"JWT","kid":"Vt9kYwPqL3mZ1cXn7sUeB0dHfA5oRiTg"}"#;
+
+/// A structurally well-formed JWT with Keycloak's header
+/// ([`KEYCLOAK_JWT_HEADER`]) carrying `claims`, with a placeholder
+/// signature. Test-only; see [`jwt_from_parts`].
+#[cfg(test)]
+pub(crate) fn unsigned_test_jwt(claims: &serde_json::Value) -> String {
+    jwt_from_parts(
+        KEYCLOAK_JWT_HEADER,
+        &claims.to_string(),
+        "placeholder-signature",
+    )
+}
+
 /// The subset of a realm's `.well-known/openid-configuration` document this
 /// client needs. Keycloak's real response has many more fields; those are
 /// silently ignored (no `deny_unknown_fields`) rather than causing a parse
@@ -1434,21 +1473,16 @@ mod tests {
     /// `client_role_capabilities`'s doc comment) test JWT carrying the
     /// given claims, plus a default `exp` a real Keycloak token would
     /// always carry (unless the caller's claims already set one) — an
-    /// `exp` claim is the one thing `client_role_capabilities`'s
-    /// `Validation` still requires present, signature checking aside.
-    /// The signing key is arbitrary — `client_role_capabilities` never
-    /// checks it.
+    /// `exp` claim is the one thing `client_role_capabilities` still
+    /// requires present and unexpired, signature checking aside.
+    /// The token is not signed — `client_role_capabilities` never
+    /// checks the signature.
     fn test_jwt(mut claims: serde_json::Value) -> String {
         if let serde_json::Value::Object(map) = &mut claims {
             map.entry("exp")
                 .or_insert_with(|| serde_json::json!(now_unix() + 300));
         }
-        jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &claims,
-            &jsonwebtoken::EncodingKey::from_secret(b"test-signing-key"),
-        )
-        .unwrap()
+        unsigned_test_jwt(&claims)
     }
 
     #[test]
