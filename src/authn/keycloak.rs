@@ -1542,6 +1542,285 @@ mod tests {
         assert!(matches!(err, IdentityError::Auth(_)));
     }
 
+    // ---- client_role_capabilities(): what it checks about a token and
+    // what it does not. These pin the `exp` check as it was on jsonwebtoken 9
+    // (`Validation::default()` with the signature check switched off and
+    // `validate_aud = false`), so a change of jsonwebtoken major cannot
+    // silently loosen it. See jsonwebtoken's "type confusion with exp/nbf"
+    // advisory: the token's `exp` must be present, a number, and not
+    // expired, and a wrong-typed `exp` must never read as "valid". The
+    // tokens carry Keycloak's real header shape (RS256 with a `kid`). ------
+
+    /// Claims that would give `division-ci` the `read:builds` role, with the
+    /// given raw JSON `exp` value (or none) spliced in.
+    fn claims_with_exp(exp: Option<serde_json::Value>) -> serde_json::Value {
+        let mut claims = serde_json::json!({
+            "resource_access": { "division-ci": { "roles": ["read:builds"] } },
+        });
+        if let Some(exp) = exp {
+            claims["exp"] = exp;
+        }
+        claims
+    }
+
+    /// `true` when `client_role_capabilities` accepted the token and mapped
+    /// the role, i.e. the token was treated as valid.
+    fn treated_as_valid(token: &str) -> bool {
+        match client_role_capabilities(token, "division-ci") {
+            Ok(caps) => {
+                assert!(caps.includes(&CapabilityScope("read:builds".to_string())));
+                true
+            }
+            Err(err) => {
+                assert!(matches!(err, IdentityError::Auth(_)), "{err:?}");
+                false
+            }
+        }
+    }
+
+    #[test]
+    fn client_role_capabilities_refuses_a_token_with_no_exp() {
+        let token = unsigned_test_jwt(&claims_with_exp(None));
+        assert!(!treated_as_valid(&token));
+    }
+
+    #[test]
+    fn client_role_capabilities_refuses_an_exp_of_the_wrong_type() {
+        let future = now_unix() + 300;
+        // Every one of these would, if it were read as "no expiry to check"
+        // or as "not expired", let an unusable token through.
+        let wrong_types = [
+            ("a string of digits", serde_json::json!(future.to_string())),
+            ("a string of text", serde_json::json!("never")),
+            ("an empty string", serde_json::json!("")),
+            ("true", serde_json::json!(true)),
+            ("false", serde_json::json!(false)),
+            ("null", serde_json::Value::Null),
+            ("an array", serde_json::json!([future])),
+            ("an object", serde_json::json!({ "exp": future })),
+            ("a negative integer", serde_json::json!(-1)),
+            ("a negative float", serde_json::json!(-1.5)),
+            ("an integer beyond u64", serde_json::json!(1e30)),
+        ];
+        for (what, exp) in wrong_types {
+            let token = unsigned_test_jwt(&claims_with_exp(Some(exp)));
+            assert!(!treated_as_valid(&token), "exp as {what} was accepted");
+        }
+    }
+
+    #[test]
+    fn client_role_capabilities_refuses_an_expired_token() {
+        let token = unsigned_test_jwt(&claims_with_exp(Some(serde_json::json!(now_unix() - 3600))));
+        assert!(!treated_as_valid(&token));
+        // The extreme: expired since the epoch.
+        let token = unsigned_test_jwt(&claims_with_exp(Some(serde_json::json!(0))));
+        assert!(!treated_as_valid(&token));
+    }
+
+    #[test]
+    fn client_role_capabilities_allows_the_default_60_second_clock_skew() {
+        // `jsonwebtoken`'s default leeway is 60 s. Against the real clock,
+        // a token that expired 58 s ago still reads as current and one that
+        // expired 62 s ago does not (so the test tolerates up to 2 s between
+        // building the token and checking it). The exact edge, 60 against 61,
+        // is pinned with a fixed clock in
+        // `require_current_exp_boundary_is_exp_equal_to_now_minus_60`.
+        let just_expired =
+            unsigned_test_jwt(&claims_with_exp(Some(serde_json::json!(now_unix() - 58))));
+        assert!(treated_as_valid(&just_expired));
+        let long_expired =
+            unsigned_test_jwt(&claims_with_exp(Some(serde_json::json!(now_unix() - 62))));
+        assert!(!treated_as_valid(&long_expired));
+    }
+
+    #[test]
+    fn client_role_capabilities_accepts_a_numeric_exp_in_any_json_number_form() {
+        // RFC 7519 NumericDate is "a JSON numeric value", fractions allowed;
+        // jsonwebtoken 9 accepted a non-negative finite float (rounded).
+        let future = now_unix() + 300;
+        for exp in [
+            serde_json::json!(future),
+            serde_json::json!(future as f64),
+            serde_json::json!(future as f64 + 0.4),
+            serde_json::json!(9_999_999_999_u64),
+        ] {
+            let token = unsigned_test_jwt(&claims_with_exp(Some(exp.clone())));
+            assert!(treated_as_valid(&token), "exp {exp} was refused");
+        }
+    }
+
+    #[test]
+    fn client_role_capabilities_does_not_check_nbf() {
+        // `Validation::validate_nbf` was never switched on: scalar `nbf`
+        // values (a number, a string, a bool, null) are accepted whatever
+        // they say. Pinned so a change here is deliberate. (Array and object
+        // values are covered by
+        // `client_role_capabilities_does_not_parse_claims_it_does_not_read`.)
+        let future = now_unix() + 300;
+        for nbf in [
+            serde_json::json!(future + 100_000),
+            serde_json::json!("not-a-number"),
+            serde_json::json!(true),
+            serde_json::Value::Null,
+        ] {
+            let mut claims = claims_with_exp(Some(serde_json::json!(future)));
+            claims["nbf"] = nbf.clone();
+            let token = unsigned_test_jwt(&claims);
+            assert!(treated_as_valid(&token), "nbf {nbf} was refused");
+        }
+    }
+
+    #[test]
+    fn client_role_capabilities_never_looks_at_the_signature() {
+        // By design (see the function's doc comment): a token whose signature
+        // is another key's, garbage, or empty is read all the same.
+        let claims = claims_with_exp(Some(serde_json::json!(now_unix() + 300)));
+        let header = KEYCLOAK_JWT_HEADER;
+        for signature in [
+            "",
+            "!!not base64url!!",
+            "AAAA",
+            "c2lnbmVkLWJ5LXNvbWVib2R5LWVsc2U",
+        ] {
+            let token = jwt_from_parts(header, &claims.to_string(), signature);
+            assert!(
+                treated_as_valid(&token),
+                "signature {signature:?} was refused"
+            );
+        }
+    }
+
+    #[test]
+    fn client_role_capabilities_does_not_check_audience_issuer_or_subject() {
+        let mut claims = claims_with_exp(Some(serde_json::json!(now_unix() + 300)));
+        claims["aud"] = serde_json::json!("some-other-service");
+        claims["iss"] = serde_json::json!("https://not-the-realm.example");
+        claims["sub"] = serde_json::json!("anyone");
+        assert!(treated_as_valid(&unsigned_test_jwt(&claims)));
+    }
+
+    /// Claims shaped like a real Keycloak access token for a confidential
+    /// client's service account (the Client Credentials grant): realm and
+    /// resource roles side by side, an `aud` list, `azp`, and the usual
+    /// extras this Kit never reads.
+    fn keycloak_service_account_claims() -> serde_json::Value {
+        serde_json::json!({
+            "exp": now_unix() + 300,
+            "iat": now_unix(),
+            "jti": "6f1c2b0e-9d63-4a38-8a57-1f0f3c2f9a11",
+            "iss": "https://id.example.com/realms/household",
+            "aud": ["account", "some-resource-server"],
+            "sub": "2d0b6a4c-5e1f-4f6e-9a77-0c1d2e3f4a5b",
+            "typ": "Bearer",
+            "azp": "division-ci",
+            "scope": "profile email",
+            "clientHost": "10.0.0.7",
+            "email_verified": false,
+            "preferred_username": "service-account-division-ci",
+            "clientAddress": "10.0.0.7",
+            "client_id": "division-ci",
+            "realm_access": {
+                "roles": ["default-roles-household", "offline_access", "uma_authorization"],
+            },
+            "resource_access": {
+                "division-ci": { "roles": ["read:builds", "write:artifacts"] },
+                "account": { "roles": ["manage-account", "view-profile"] },
+            },
+        })
+    }
+
+    #[test]
+    fn client_role_capabilities_reads_a_keycloak_shaped_service_account_token() {
+        let token = unsigned_test_jwt(&keycloak_service_account_claims());
+        let caps = client_role_capabilities(&token, "division-ci").unwrap();
+        assert_eq!(caps.scopes.len(), 2, "{:?}", caps.scopes);
+        assert!(caps.includes(&CapabilityScope("read:builds".to_string())));
+        assert!(caps.includes(&CapabilityScope("write:artifacts".to_string())));
+        // Only this client's own roles: neither the realm roles nor another
+        // client's roles in the same token become capabilities.
+        for other in [
+            "offline_access",
+            "manage-account",
+            "default-roles-household",
+        ] {
+            assert!(
+                !caps.includes(&CapabilityScope(other.to_string())),
+                "{other} leaked into the capabilities"
+            );
+        }
+    }
+
+    #[test]
+    fn client_role_capabilities_reads_tokens_whatever_the_signing_algorithm() {
+        // Keycloak signs with RS256 by default (the header every other test
+        // uses), but a realm can use others, and the Kit never looks at the
+        // signature: an HMAC token without a `kid` and an ES256 one with a
+        // `kid` read the same.
+        let payload = keycloak_service_account_claims().to_string();
+        for header in [
+            r#"{"alg":"HS256","typ":"JWT"}"#,
+            r#"{"alg":"ES256","typ":"JWT","kid":"ec-realm-key-1"}"#,
+        ] {
+            let token = jwt_from_parts(header, &payload, "placeholder-signature");
+            let caps = client_role_capabilities(&token, "division-ci")
+                .unwrap_or_else(|e| panic!("{header}: {e:?}"));
+            assert!(
+                caps.includes(&CapabilityScope("read:builds".to_string())),
+                "{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn client_role_capabilities_refuses_a_token_that_is_not_a_jwt() {
+        let claims = claims_with_exp(Some(serde_json::json!(now_unix() + 300)));
+        let good_header = KEYCLOAK_JWT_HEADER;
+        let good_payload = claims.to_string();
+        let cases = [
+            ("empty", String::new()),
+            ("one segment", "abc".to_string()),
+            ("two segments", {
+                let t = jwt_from_parts(good_header, &good_payload, "x");
+                t.rsplit_once('.').unwrap().0.to_string()
+            }),
+            (
+                "payload not JSON",
+                jwt_from_parts(good_header, "not json", "x"),
+            ),
+            (
+                "payload a JSON array",
+                jwt_from_parts(good_header, "[1,2]", "x"),
+            ),
+            (
+                "header not JSON",
+                jwt_from_parts("not json", &good_payload, "x"),
+            ),
+            (
+                "no alg",
+                jwt_from_parts(r#"{"typ":"JWT"}"#, &good_payload, "x"),
+            ),
+            // An unsigned `alg: none` token is not a token this Kit reads.
+            (
+                "alg none",
+                jwt_from_parts(r#"{"alg":"none"}"#, &good_payload, ""),
+            ),
+            (
+                "unknown alg",
+                jwt_from_parts(r#"{"alg":"XX999"}"#, &good_payload, "x"),
+            ),
+            (
+                "resource_access of the wrong shape",
+                unsigned_test_jwt(&serde_json::json!({
+                    "resource_access": "everything",
+                    "exp": now_unix() + 300,
+                })),
+            ),
+        ];
+        for (what, token) in cases {
+            assert!(!treated_as_valid(&token), "{what} was accepted");
+        }
+    }
+
     // ---- service_principal(): full client-credentials exchange against a
     // local mock server ----------------------------------------------------
 
