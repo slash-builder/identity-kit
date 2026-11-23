@@ -198,23 +198,17 @@ mod tests {
     /// above, applied to the new construction site.
     #[test]
     fn service_principal_capabilities_never_reflect_a_groups_claim() {
-        use crate::authn::keycloak::client_role_capabilities;
-        use jsonwebtoken::{encode, EncodingKey, Header};
+        use crate::authn::keycloak::{client_role_capabilities, unsigned_test_jwt};
 
         let claims = serde_json::json!({
             "resource_access": { "division-ci": { "roles": ["read:builds"] } },
             "groups": ["/households/11111111-1111-1111-1111-111111111111/owner"],
-            // `client_role_capabilities`'s `Validation` requires `exp`
-            // present (a real Keycloak token always carries one); not
+            // `client_role_capabilities` requires `exp` present and
+            // unexpired (a real Keycloak token always carries one); not
             // otherwise checked by this test.
             "exp": 9_999_999_999_i64,
         });
-        let token = encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(b"test-signing-key"),
-        )
-        .unwrap();
+        let token = unsigned_test_jwt(&claims);
 
         let capabilities = client_role_capabilities(&token, "division-ci").unwrap();
         let principal = ServicePrincipal::new(None, capabilities);

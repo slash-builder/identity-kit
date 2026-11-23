@@ -1,0 +1,8 @@
+# This crate selects no jsonwebtoken crypto backend (see the note on the dependency in Cargo.toml), so these compile and then
+# panic at run time. The only jsonwebtoken call here is `dangerous::insecure_decode`, which never touches the backend.
+disallowed-methods = [
+  { path = "jsonwebtoken::decode", reason = "needs a crypto backend; this crate selects none, so it panics at run time; use jsonwebtoken::dangerous::insecure_decode and check the claims yourself" },
+  { path = "jsonwebtoken::encode", reason = "needs a crypto backend; this crate selects none, so it panics at run time; build test tokens by hand (see unsigned_test_jwt)" },
+  { path = "jsonwebtoken::crypto::sign", reason = "needs a crypto backend; this crate selects none, so it panics at run time" },
+  { path = "jsonwebtoken::crypto::verify", reason = "needs a crypto backend; this crate selects none, so it panics at run time" },
+]
