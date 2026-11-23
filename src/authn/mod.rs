@@ -29,6 +29,29 @@
 //! See `keycloak::KeycloakAuthN::service_principal`'s doc comment for
 //! the full distinction; the refusal above is unchanged and this is not
 //! an exception to it.
+//!
+//! ## What this module verifies, and what it does not
+//!
+//! Checked by this crate:
+//!
+//! - Every URL that carries a credential or token (the base URL, the endpoints in the discovery document, and redirect
+//!   targets) must be `https`, or `http` to a loopback host; certificate verification is left on.
+//! - In the interactive flow, the `state` returned to the redirect URI must equal the CSRF `state` minted by
+//!   [`AuthN::begin_sign_in`], and the code exchange carries the PKCE verifier.
+//! - For [`AuthN::service_principal_keycloak`], the access token must be a well-formed JWT whose `exp` claim is present
+//!   and not in the past (allowing the `jsonwebtoken` default leeway).
+//!
+//! **Not** checked by this crate:
+//!
+//! - The signature, issuer and audience of any JWT. No signing keys are fetched. The access token of a service
+//!   principal is decoded only to read its `resource_access` roles, so those roles are trusted to the extent that the
+//!   connection to the token endpoint is.
+//! - Anything about the tokens of the interactive flow beyond passing them on: the access token is not decoded, no ID
+//!   token is read or validated, and no nonce is used. The [`Account`](crate::account::Account) in a [`Session`] is
+//!   taken from the userinfo response as returned.
+//! - The integrity of what a [`TokenCache`] hands back; a cached [`Session`] is used as stored.
+//!
+//! A service that enforces access must verify any token it is handed for itself.
 
 use std::sync::Arc;
 
@@ -52,7 +75,9 @@ enum Provider {
 
 /// Configuration for the Auth0 provider.
 pub struct Auth0Config {
+    /// The Auth0 tenant domain. Not read: [`AuthN::auth0`] returns [`IdentityError::NotImplemented`] without using it.
     pub domain: String,
+    /// The Auth0 client id. Not read: [`AuthN::auth0`] returns [`IdentityError::NotImplemented`] without using it.
     pub client_id: String,
 }
 
@@ -97,6 +122,11 @@ impl AuthN {
     /// Unlike [`AuthN::keycloak`], this doesn't return (or need) a
     /// connected `AuthN` instance — there is no interactive session, no
     /// cached token, and no human account behind the result.
+    ///
+    /// The returned principal's [`Capabilities`](crate::authz::Capabilities) are the roles in the issued access token's
+    /// `resource_access` claim for `roles_client_id`. The token comes straight from the realm's token endpoint, but this
+    /// crate does not verify its signature, issuer or audience; it checks only that it is a well-formed JWT with an
+    /// `exp` claim that is present and not in the past. Code that enforces access must verify the token itself.
     pub async fn service_principal_keycloak(
         config: KeycloakServicePrincipalConfig,
     ) -> Result<ServicePrincipal, IdentityError> {

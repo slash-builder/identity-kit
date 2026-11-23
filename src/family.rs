@@ -59,8 +59,12 @@ pub struct FamilyClient {
 /// `InviteMemberRequest` exactly (see its README's alignment table).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteMemberRequest {
+    /// The `id` of the account being invited.
     pub account_id: Uuid,
+    /// A display name for the invitee, sent as given in the request body. This crate does not interpret it.
     pub display_name: String,
+    /// The role the invitee will hold. It is fixed at invite time; [`FamilyClient::accept_invite`] sends no body. This
+    /// crate sends the role as given and does not check it.
     pub role: FamilyRole,
 }
 
@@ -74,15 +78,23 @@ pub struct InviteMemberRequest {
 /// separately to build a full [`Membership`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MembershipRecord {
+    /// The `id` of the member's account. Becomes [`Membership::person`] in [`MembershipRecord::into_membership`].
     pub account_id: Uuid,
+    /// The `id` of the household. Becomes [`Membership::household`] in [`MembershipRecord::into_membership`].
+    /// [`FamilyClient::invite`] and [`FamilyClient::accept_invite`] fail if it differs from the household they targeted.
     pub household_id: Uuid,
     /// The household's own `display_name`, when cheaply available
     /// server-side. `None` on endpoints that don't fetch it (e.g. the
     /// household-scoped roster read, where the caller already supplied
     /// the household) or when the lookup missed.
     pub household_display_name: Option<String>,
+    /// The member's display name as the identity service reports it. [`MembershipRecord::into_membership`] does not
+    /// carry it into the [`Membership`].
     pub display_name: String,
+    /// The member's role. Becomes [`Membership::role`] in [`MembershipRecord::into_membership`].
     pub role: FamilyRole,
+    /// When the member joined (UTC), as the identity service reports it. Becomes [`Membership::joined_at`] in
+    /// [`MembershipRecord::into_membership`].
     pub joined_at: DateTime<Utc>,
     /// Left as an open string, matching the identity service's own
     /// member-record `state` — currently `"active"` or `"pending"` (an
@@ -127,8 +139,8 @@ impl MembershipRecord {
 impl FamilyClient {
     /// Construct a client against a running identity-service instance.
     ///
-    /// `access_token` is the caller's own validated
-    /// access token, forwarded verbatim as `Authorization: Bearer` on
+    /// `access_token` is an access token the caller has
+    /// already obtained; it is forwarded verbatim, and not inspected, as `Authorization: Bearer` on
     /// every call — identity-service is an OAuth2 resource server (see
     /// its README's "API contract"); this Kit never collects or mints
     /// credentials itself.

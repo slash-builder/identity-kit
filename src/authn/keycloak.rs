@@ -86,6 +86,9 @@ pub struct KeycloakConfig {
     /// e.g. `staff`, `household`. This is the per-product knob — never
     /// hardcode it.
     pub realm: String,
+    /// The OAuth2 client id registered in the realm. Must not be blank (empty or whitespace-only):
+    /// [`AuthN::keycloak`](crate::authn::AuthN::keycloak) rejects it with [`IdentityError::Auth`]. It is also part of
+    /// the [`TokenCache`] key the session is stored under.
     pub client_id: String,
     /// Confidential clients only. Native/mobile/SPA clients doing
     /// Authorization Code + PKCE should leave this `None`.
@@ -219,6 +222,11 @@ pub struct KeycloakServicePrincipalConfig {
     /// e.g. `staff`, `household`. Never hardcode — same discipline as
     /// [`KeycloakConfig::realm`].
     pub realm: String,
+    /// The confidential client's id. Must not be blank (empty or whitespace-only):
+    /// [`AuthN::service_principal_keycloak`](crate::authn::AuthN::service_principal_keycloak) rejects it with
+    /// [`IdentityError::Auth`].
+    /// [`KeycloakServicePrincipalConfig::new`] also uses it as the default for
+    /// [`roles_client_id`](Self::roles_client_id).
     pub client_id: String,
     /// The confidential client's secret. Never logged, never
     /// `Debug`/`Display`-printed (see the manual [`fmt::Debug`] impl just
@@ -432,7 +440,10 @@ fn now_unix() -> u64 {
 /// authorize URL's `code_challenge` commits to.
 #[derive(Debug)]
 pub struct PendingAuthorization {
+    /// The authorization URL to open in the browser or webview: Authorization Code with a PKCE `S256` challenge.
     pub authorize_url: Url,
+    /// The random CSRF `state` generated for this attempt and carried in [`authorize_url`](Self::authorize_url).
+    /// [`AuthN::complete_sign_in`](crate::authn::AuthN::complete_sign_in) refuses a redirect whose `state` differs.
     pub csrf_state: String,
     pkce_verifier: PkceCodeVerifier,
 }
@@ -476,10 +487,17 @@ impl fmt::Debug for Session {
 }
 
 impl Session {
+    /// The account resolved from the IdP's userinfo endpoint at sign-in, fetched over TLS with the access token.
+    /// [`AuthN::refresh`](crate::authn::AuthN::refresh) carries it over from the cached session; it is not fetched
+    /// again. The userinfo response is not signature-verified, and a `Session` read back from a [`TokenCache`] is used
+    /// as stored.
     pub fn account(&self) -> &Account {
         &self.account
     }
 
+    /// The access token as returned by the token endpoint (or as stored, for a `Session` deserialised from a cache).
+    /// This crate does not decode or verify it and does not check that it is still valid; see [`Session::is_expired`].
+    /// It is a live bearer credential; `Debug` on [`Session`] redacts it.
     pub fn access_token(&self) -> &str {
         &self.access_token
     }

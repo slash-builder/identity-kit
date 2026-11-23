@@ -5,6 +5,7 @@
 //! AuthZ engine; doesn't implement either.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 pub mod account;
 pub mod authn;
